@@ -24,10 +24,10 @@ tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
 # Constants
-Round = 150
+Round = 200
 Clinets_per_round = 10
 Batch_size = 2048
-Gan_epoch = 50
+Gan_epoch = 100
 Test_accuracy = []
 Models = { }
 Client_data = {}
@@ -237,17 +237,17 @@ for r in range(Round):
             model_weights_sum += np.array(Models[i].get_weights())
 
         # Attack (suppose client 0 is malicious)
-        if r != 0 and i == 0 and Test_accuracy[i-1] > 0.87:
+        if r != 0 and i == 0 and Test_accuracy[i-1] > 0.89:
             malicious_discriminator.set_weights(Models[i].get_weights())
             train(train_ds, train_l, Gan_epoch)
 
             # Merge the malicious images
             predictions = generator(seed_merge, training=False)
             malicious_images = np.array(predictions)
-            np.vstack((Client_data[i], malicious_images))
+            Client_data[i] = np.vstack((Client_data[i], malicious_images))
             # Label the malicious images
             malicious_labels = np.array([0]*len(malicious_images))
-            np.append(Client_labels[i], malicious_labels)
+            Client_labels[i] = np.append(Client_labels[i], malicious_labels)
 
 
     # averaging the weights
