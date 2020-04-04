@@ -24,17 +24,25 @@ tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
 # Constants
-Round = 60
+Round = 150
 Clinets_per_round = 10
-Batch_size = 3000
+Batch_size = 2048
+Gan_epoch = 50
 Test_accuracy = []
-Target_accuracy = []
-Others_accuracy = []
 Models = { }
-Attack_models = { }
 Client_data = {}
 Client_labels = {}
 
+BATCH_SIZE = 256
+noise_dim = 100
+num_examples_to_generate = 16
+num_to_merge = 200
+seed = tf.random.normal([num_examples_to_generate, noise_dim])
+seed_merge = tf.random.normal([num_to_merge, noise_dim])
+
+#########################################################################
+##                             Load Data                               ##
+#########################################################################
 
 # Data
 (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
@@ -42,17 +50,21 @@ train_images = train_images.reshape(train_images.shape[0], 28, 28, 1).astype('fl
 train_images = (train_images - 127.5) / 127.5   # Normalization
 test_images = test_images.reshape(test_images.shape[0], 28, 28, 1).astype('float32')
 test_images = (test_images - 127.5) / 127.5   # Normalization
-# 每个用户拥有3种类型的数据，攻击者并没有其他类别的样本
-# attack_label = 0
-# attack_images = train_images[train_labels == attack_label]
-# train_images = np.delete(train_images, train_images==attack_label)
-# train_labels = np.delete(train_labels, train_images==attack_label)
+
+# 每个Client拥有3种类型的数据，Attacker并没有target类别的样本
 for i in range(10):
     Client_data.update({i:np.vstack((np.vstack((train_images[train_labels==i], train_images[train_labels==(i+1)%9])), train_images[train_labels==(i+2)%9]))})
     Client_labels.update({i:np.append(np.append(train_labels[train_labels==i], train_labels[train_labels==(i+1)%9]), train_labels[train_labels==(i+2)%9])})
-    print(len(train_labels[train_labels==i]))
+    state = np.random.get_state()
+    np.random.shuffle(Client_data[i])
+    np.random.set_state(state)
+    np.random.shuffle(Client_labels[i])
+    # print(len(train_labels[train_labels==i]))
 
 
+#########################################################################
+##                          Models Prepared                            ##
+#########################################################################
 
 # Models & malicious discriminator model
 def make_discriminator_model():
@@ -99,7 +111,6 @@ def make_generator_model():
 # Sever‘s models
 model = make_discriminator_model()
 
-
 # Clients' models
 for i in range(Clinets_per_round):
     Models.update({i:make_discriminator_model()})
@@ -136,7 +147,9 @@ def generator_loss(fake_output):
     ideal_result = np.zeros(len(fake_output))
     # Attack label
     for i in range(len(ideal_result)):
-        ideal_result[i] = 0
+        # The class which attacker intends to get
+        # suppose 4 here
+        ideal_result[i] = 4
     
     return cross_entropy(ideal_result, fake_output)
 
@@ -152,10 +165,8 @@ def train_step(images, labels):
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         generated_images = generator(noise, training=True)
         
-
-        # real output取的是你要模仿的那个数字的概率！！！
+        # real_output取的是要模仿的那个数字的概率
         real_output = malicious_discriminator(images, training=False)
-        
         fake_output = malicious_discriminator(generated_images, training=False)
         
         gen_loss = generator_loss(fake_output)
@@ -167,41 +178,76 @@ def train_step(images, labels):
     generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
     discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, malicious_discriminator.trainable_variables))
 
-
-
-
 # Train
-model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4),
+def train(dataset, labels, epochs):
+    for epoch in range(epochs):
+        start = time.time()
+        for i in range(round(len(dataset)/BATCH_SIZE)):
+            image_batch = dataset[i*BATCH_SIZE:min(len(dataset), (i+1)*BATCH_SIZE)]
+            labels_batch = labels[i*BATCH_SIZE:min(len(dataset), (i+1)*BATCH_SIZE)]
+            train_step(image_batch, labels_batch)
+
+        print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
+
+    # 最后一个epoch结束后生成图片并merge到dataset中
+    generate_and_save_images(generator, epochs, seed)
+
+# Generate images to check the effect
+def generate_and_save_images(model, epoch, test_input):
+    predictions = model(test_input, training=False)
+
+    fig = plt.figure(figsize=(4,4))
+
+    for i in range(predictions.shape[0]):
+        plt.subplot(4, 4, i+1)
+        plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
+        plt.axis('off')
+
+    plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
+
+
+#########################################################################
+##                         Federated Learning                          ##
+#########################################################################
+
+# Training Prepare
+model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3),
               loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
               metrics=['accuracy'])
-model.fit(train_images, train_labels, validation_split=0, epochs=1, batch_size = 10000)
+model.fit(train_images, train_labels, validation_split=0, epochs=1, batch_size = 8192)
 del train_images, train_labels
 
-# federated learning
+# Federated learning
 for r in range(Round):
     print('round:'+str(r))
     model_weights_sum=[]
 
        
     for i in range(Clinets_per_round):
-        # if i != 0:
-        #     break
-
         # train the clients individually
         if r != 0:
             Models[i].set_weights(tmp_weight)
-
-               
+        
         train_ds = Client_data[i]
         train_l = Client_labels[i]
         Models[i].fit(train_ds, train_l, validation_split=0, epochs=1, batch_size = Batch_size)     
         if i == 0:
             model_weights_sum = np.array(Models[i].get_weights())
-            # print(type(Models[i].get_weights()))
-            # print(model_weights_sum)
         else:
             model_weights_sum += np.array(Models[i].get_weights())
-            # print(model_weights_sum)
+
+        # Attack (suppose client 0 is malicious)
+        if r != 0 and i == 0 and Test_accuracy[i-1] > 0.87:
+            malicious_discriminator.set_weights(Models[i].get_weights())
+            train(train_ds, train_l, Gan_epoch)
+
+            # Merge the malicious images
+            predictions = generator(seed_merge, training=False)
+            malicious_images = np.array(predictions)
+            np.vstack((Client_data[i], malicious_images))
+            # Label the malicious images
+            malicious_labels = np.array([0]*len(malicious_images))
+            np.append(Client_labels[i], malicious_labels)
 
 
     # averaging the weights
@@ -214,20 +260,3 @@ for r in range(Round):
     test_loss, test_acc = model.evaluate(test_images, test_labels, verbose=0)
     Test_accuracy.append(test_acc)
     print('\nTest accuracy:', test_acc, 'Tset loss:', test_loss)
-
-    
-
-   
-
-
-# figures
-x=np.arange(0,55)
-y=np.array(Test_accuracy)
-y1=np.array(Target_accuracy)
-plt.title("Test Accuracy")
-plt.xlabel("Round")
-plt.ylabel("Acc")
-plt.plot(x,y)
-plt.plot(x,y1)
-plt.show()
-plt.savefig("fedrated_learning_atack.png")
