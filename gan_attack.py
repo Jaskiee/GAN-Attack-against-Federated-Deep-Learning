@@ -133,7 +133,8 @@ def train_step(images, labels):
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         generated_images = generator(noise, training=True)
-       
+        print(generated_images.shape)
+
         # real output取的是要模仿的那个数字的概率
         real_output = malicious_discriminator(images, training=False)
         fake_output = malicious_discriminator(generated_images, training=False)
@@ -167,7 +168,6 @@ def generate_and_save_images(model, epoch, test_input):
     # 注意 training 设定为 False
     # 因此，所有层都在推理模式下运行（batchnorm）。
     predictions = model(test_input, training=False)
-
     fig = plt.figure(figsize=(4,4))
 
     for i in range(predictions.shape[0]):
