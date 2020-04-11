@@ -6,8 +6,6 @@ from __future__ import unicode_literals
 # TensorFlow, tf.keras and tensorflow_federated
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_federated as tff
-
 
 # Helper libraries
 import numpy as np
@@ -18,7 +16,7 @@ import os
 import PIL
 import time
 
-# tf2.0 不加报错
+# tf2.0 setting
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -27,7 +25,7 @@ tf.config.experimental.set_memory_growth(physical_devices[0], True)
 # Constants
 BUFFER_SIZE = 60000
 BATCH_SIZE = 256
-EPOCHS = 100
+EPOCHS = 150
 noise_dim = 100
 num_examples_to_generate = 16
 seed = tf.random.normal([num_examples_to_generate, noise_dim])
@@ -40,6 +38,16 @@ train_images = (train_images - 127.5) / 127.5   # Normalization
 train_dataset = tf.data.Dataset.from_tensor_slices(train_images).shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
 test_images = test_images.reshape(test_images.shape[0], 28, 28, 1).astype('float32')
 test_images = (test_images - 127.5) / 127.5   # Normalization
+
+
+state = np.random.get_state()
+np.random.shuffle(train_images)
+np.random.set_state(state)
+np.random.shuffle(train_labels)
+
+# Sample to warm up
+warm_up_data = train_images[0:3000]
+warm_up_labels = train_labels[0:3000]
 
 # Generator Model
 def make_generator_model():
@@ -86,12 +94,11 @@ def make_discriminator_model():
 
 # discriminator = make_discriminator_model()
 
-# 总的判别模型
+# The discriminator model
 malicious_discriminator = make_discriminator_model()
 malicious_discriminator.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
-malicious_discriminator.fit(train_images, train_labels, epochs=15, batch_size=3000)
-# print(real_output.shape)
-# print(real_output)
+malicious_discriminator.fit(warm_up_data, warm_up_labels, epochs=20, batch_size=256)
+
 
 test_loss, test_acc = malicious_discriminator.evaluate(test_images, test_labels, verbose=0)
 print('\nTest accuracy:', test_acc, 'Tset loss:', test_loss)
@@ -118,7 +125,7 @@ def generator_loss(fake_output):
     ideal_result = np.zeros(len(fake_output))
     # Attack label
     for i in range(len(ideal_result)):
-        ideal_result[i] = 0
+        ideal_result[i] = 8
     
     return cross_entropy(ideal_result, fake_output)
 
@@ -135,7 +142,7 @@ def train_step(images, labels):
         generated_images = generator(noise, training=True)
         print(generated_images.shape)
 
-        # real output取的是要模仿的那个数字的概率
+        # real_output is the probability of the mimic number
         real_output = malicious_discriminator(images, training=False)
         fake_output = malicious_discriminator(generated_images, training=False)
         
@@ -160,13 +167,12 @@ def train(dataset, labels, epochs):
 
         print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
 
-    # 最后一个epoch结束后生成图片
+    # Last epoch generate the images and merge them to the dataset
     generate_and_save_images(generator, epochs, seed)
 
 # Generate images
 def generate_and_save_images(model, epoch, test_input):
-    # 注意 training 设定为 False
-    # 因此，所有层都在推理模式下运行（batchnorm）。
+
     predictions = model(test_input, training=False)
     fig = plt.figure(figsize=(4,4))
 
@@ -177,6 +183,8 @@ def generate_and_save_images(model, epoch, test_input):
 
     plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
 
+attack_images = train_images[train_labels==0]
+attack_labels = train_labels[train_labels==0]
 
 # Train model
-train(train_images, train_labels, EPOCHS)
+train(attack_images, attack_labels, EPOCHS)
