@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 # TensorFlow, tf.keras and tensorflow_federated
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_federated as tff
+# import tensorflow_federated as tff
 
 # Helper libraries
 import numpy as np
@@ -189,7 +189,7 @@ def train_step(images, labels):
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         generated_images = generator(noise, training=True)
         
-        # real_output取的是要模仿的那个数字的概率
+        # real_output is the probability of the mimic number
         real_output = malicious_discriminator(images, training=False)
         fake_output = malicious_discriminator(generated_images, training=False)
         
