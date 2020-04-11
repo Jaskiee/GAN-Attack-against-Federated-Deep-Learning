@@ -14,6 +14,6 @@ Here are some attack result:
 
 ![3_1](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/3_1.png) ![3_2](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/3_2.png)
 
-！[5_1](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/5_1.png) ![5_2](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/5_2.png)
+![5_1](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/5_1.png) ![5_2](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/5_2.png)
 
 ![9_1](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/9_1.png) ![9_2](https://github.com/Jaskiee/GAN-Attack-against-Federated-Deep-Learning/blob/master/result/9_2.png)
