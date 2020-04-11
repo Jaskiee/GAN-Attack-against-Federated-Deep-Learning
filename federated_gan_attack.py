@@ -17,17 +17,17 @@ import os
 import PIL
 import time
 
-# tf2.0 不加报错
+# tf2.0 setting
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
 # Constants
-Round = 200
+Round = 300
 Clinets_per_round = 10
 Batch_size = 2048
-Gan_epoch = 100
+Gan_epoch = 1
 Test_accuracy = []
 Models = { }
 Client_data = {}
@@ -35,8 +35,9 @@ Client_labels = {}
 
 BATCH_SIZE = 256
 noise_dim = 100
-num_examples_to_generate = 16
-num_to_merge = 200
+num_examples_to_generate = 36
+num_to_merge = 500
+# num_to_merge = 50
 seed = tf.random.normal([num_examples_to_generate, noise_dim])
 seed_merge = tf.random.normal([num_to_merge, noise_dim])
 
@@ -51,15 +52,39 @@ train_images = (train_images - 127.5) / 127.5   # Normalization
 test_images = test_images.reshape(test_images.shape[0], 28, 28, 1).astype('float32')
 test_images = (test_images - 127.5) / 127.5   # Normalization
 
-# 每个Client拥有3种类型的数据，Attacker并没有target类别的样本
-for i in range(10):
-    Client_data.update({i:np.vstack((np.vstack((train_images[train_labels==i], train_images[train_labels==(i+1)%9])), train_images[train_labels==(i+2)%9]))})
-    Client_labels.update({i:np.append(np.append(train_labels[train_labels==i], train_labels[train_labels==(i+1)%9]), train_labels[train_labels==(i+2)%9])})
+state = np.random.get_state()
+np.random.shuffle(train_images)
+np.random.set_state(state)
+np.random.shuffle(train_labels)
+
+# Sample to warm up
+warm_up_data = train_images[0:3000]
+warm_up_labels = train_labels[0:3000]
+
+# Each Client owns different data, Attacker has no targeted samples
+for i in range(Clinets_per_round):
+    # Client_data.update({i:np.vstack((np.vstack((train_images[train_labels==i], train_images[train_labels==(i+1)%9])), train_images[train_labels==(i+2)%9]))})
+    # Client_labels.update({i:np.append(np.append(train_labels[train_labels==i], train_labels[train_labels==(i+1)%9]), train_labels[train_labels==(i+2)%9])})
+    
+    # One for 5 classes
+    # Client_data.update({i:train_images[train_labels==(i*5)]})
+    # Client_labels.update({i:train_labels[train_labels==(i*5)]})
+    # for j in range(4):
+    #     Client_data[i] = np.vstack((Client_data[i], train_images[train_labels==(i+j+1)]))
+    #     Client_labels[i] = np.append(Client_labels[i], train_labels[train_labels==(i+j+1)])
+    
+    # Each Client has one class
+    Client_data.update({i:train_images[train_labels==i]})
+    Client_labels.update({i:train_labels[train_labels==i]})
+    # Shuffle
     state = np.random.get_state()
     np.random.shuffle(Client_data[i])
     np.random.set_state(state)
     np.random.shuffle(Client_labels[i])
     # print(len(train_labels[train_labels==i]))
+
+attack_ds = np.array(Client_data[0])
+attack_l = np.array(Client_labels[0])
 
 
 #########################################################################
@@ -87,22 +112,22 @@ def make_generator_model():
     
     model.add(keras.layers.Dense(7*7*256, use_bias=False, input_shape=(100,)))
     model.add(keras.layers.BatchNormalization())
-    model.add(keras.layers.LeakyReLU())
+    model.add(keras.layers.ReLU())
 
     model.add(keras.layers.Reshape((7, 7, 256)))
     assert model.output_shape == (None, 7, 7, 256)  # Batch size is not limited
 
-    model.add(keras.layers.Conv2DTranspose(128, (5, 5), strides=(1, 1), padding='same', use_bias=False))
+    model.add(keras.layers.Conv2DTranspose(128, (4, 4), strides=(1, 1), padding='same', use_bias=False))
     assert model.output_shape == (None, 7, 7, 128)
     model.add(keras.layers.BatchNormalization())
-    model.add(keras.layers.LeakyReLU())
+    model.add(keras.layers.ReLU())
 
-    model.add(keras.layers.Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same', use_bias=False))
+    model.add(keras.layers.Conv2DTranspose(64, (4, 4), strides=(2, 2), padding='same', use_bias=False))
     assert model.output_shape == (None, 14, 14, 64)
     model.add(keras.layers.BatchNormalization())
-    model.add(keras.layers.LeakyReLU())
+    model.add(keras.layers.ReLU())
 
-    model.add(keras.layers.Conv2DTranspose(1, (5, 5), strides=(2, 2), padding='same', use_bias=False, activation='tanh'))
+    model.add(keras.layers.Conv2DTranspose(1, (4, 4), strides=(2, 2), padding='same', use_bias=False, activation='tanh'))
     assert model.output_shape == (None, 28, 28, 1)
 
     return model
@@ -148,14 +173,13 @@ def generator_loss(fake_output):
     # Attack label
     for i in range(len(ideal_result)):
         # The class which attacker intends to get
-        # suppose 4 here
-        ideal_result[i] = 4
+        ideal_result[i] = 3
     
     return cross_entropy(ideal_result, fake_output)
 
-# Adam optimizer
-generator_optimizer = tf.keras.optimizers.Adam(1e-4)
-discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
+# Optimizer
+generator_optimizer = tf.keras.optimizers.SGD(learning_rate=1e-3, decay=1e-7)
+discriminator_optimizer = tf.keras.optimizers.SGD(learning_rate=1e-4, decay=1e-7)
 
 # Training step
 @tf.function
@@ -189,17 +213,17 @@ def train(dataset, labels, epochs):
 
         print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
 
-    # 最后一个epoch结束后生成图片并merge到dataset中
+    # Last epoch generate the images and merge them to the dataset
     generate_and_save_images(generator, epochs, seed)
 
 # Generate images to check the effect
 def generate_and_save_images(model, epoch, test_input):
     predictions = model(test_input, training=False)
 
-    fig = plt.figure(figsize=(4,4))
+    fig = plt.figure(figsize=(6,6))
 
     for i in range(predictions.shape[0]):
-        plt.subplot(4, 4, i+1)
+        plt.subplot(6, 6, i+1)
         plt.imshow(predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
         plt.axis('off')
 
@@ -210,50 +234,77 @@ def generate_and_save_images(model, epoch, test_input):
 ##                         Federated Learning                          ##
 #########################################################################
 
-# Training Prepare
+# Training Preparation
 model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3),
               loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
               metrics=['accuracy'])
-model.fit(train_images, train_labels, validation_split=0, epochs=1, batch_size = 8192)
+
+model.fit(warm_up_data, warm_up_labels, validation_split=0, epochs=25, batch_size = 256)
 del train_images, train_labels
+
+tmp_weight = model.get_weights()
+
+attack_count = 0
 
 # Federated learning
 for r in range(Round):
-    print('round:'+str(r))
-    model_weights_sum=[]
-
+    print('round:'+str(r+1))
+    model_weights_sum = []
+    # model_weight_tmp = []
+    # tmp_weight = model.get_weights()
        
     for i in range(Clinets_per_round):
+
         # train the clients individually
-        if r != 0:
-            Models[i].set_weights(tmp_weight)
+        # if r != 0:
+        #     Models[i].set_weights(tmp_weight)
+        Models[i].set_weights(tmp_weight)
         
         train_ds = Client_data[i]
         train_l = Client_labels[i]
-        Models[i].fit(train_ds, train_l, validation_split=0, epochs=1, batch_size = Batch_size)     
-        if i == 0:
-            model_weights_sum = np.array(Models[i].get_weights())
-        else:
-            model_weights_sum += np.array(Models[i].get_weights())
 
         # Attack (suppose client 0 is malicious)
-        if r != 0 and i == 0 and Test_accuracy[i-1] > 0.89:
-            malicious_discriminator.set_weights(Models[i].get_weights())
-            train(train_ds, train_l, Gan_epoch)
+        if r != 0 and i == 0 and Test_accuracy[i-1] > 0.85:
+            print("Attack round: {}".format(attack_count+1))
 
-            # Merge the malicious images
+            malicious_discriminator.set_weights(Models[i].get_weights())
+            # train(attack_ds, attack_l, Gan_epoch)
+            train(attack_ds, attack_l, Gan_epoch)
+            
+
             predictions = generator(seed_merge, training=False)
             malicious_images = np.array(predictions)
-            Client_data[i] = np.vstack((Client_data[i], malicious_images))
-            # Label the malicious images
-            malicious_labels = np.array([0]*len(malicious_images))
-            Client_labels[i] = np.append(Client_labels[i], malicious_labels)
+            malicious_labels = np.array([1]*len(malicious_images))
+
+            # Merge the malicious images
+            if attack_count == 0:
+                Client_data[i] = np.vstack((Client_data[i], malicious_images))
+                # Label the malicious images
+                Client_labels[i] = np.append(Client_labels[i], malicious_labels)  
+            else:
+                Client_data[i][len(Client_data[i])-len(malicious_images):len(Client_data[i])] = malicious_images
+
+            attack_count += 1
+    
+
+
+        Models[i].fit(train_ds, train_l, validation_split=0, epochs=1, batch_size = Batch_size)     
+        
+        if i == 0:
+            model_weights_sum = np.array(Models[i].get_weights())
+            # model_weight_tmp = np.array(Models[i].get_weights())
+        else:
+            model_weights_sum += np.array(Models[i].get_weights())
+            # delta_weight = np.array(Models[i].get_weights()) - np.array(tmp_weight)
+            # model_weight_tmp += delta_weight
 
 
     # averaging the weights
     mean_weight = np.true_divide(model_weights_sum,Clinets_per_round)
     tmp_weight = mean_weight.tolist()
     del model_weights_sum
+    # tmp_weight = model_weight_tmp
+    # del model_weight_tmp
 
     # evaluate
     model.set_weights(tmp_weight)
