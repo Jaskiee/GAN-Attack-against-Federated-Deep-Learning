@@ -4,7 +4,7 @@ This project is the reproduction of the paper [Deep Models Under the GAN: Inform
 
 This reproduction assumes that there're 10 clients patcipating the training, and each one of them has a certain class of data.
 
-For convience, I use the weight averaging aggregation insetead of choosing certain portion of the parameters to upload or download.
+For convenience, I use the weight averaging aggregation insetead of choosing certain portion of the parameters to upload or download.
 
 In this scenario, each paticpant owns different data, which means that their data are in non-iid condition, so the averaging aggregation seems difficult to converge, I refer the paper [Federated Learning with Non-IID Data](https://arxiv.org/pdf/1806.00582.pdf) and apply a warm-up training to the centralized model with 5% of all the data, this strategy raise the accuracy of the later training process.
 
