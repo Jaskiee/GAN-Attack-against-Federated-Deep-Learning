@@ -1,5 +1,6 @@
 # GAN Attack against Federated Deep Learning
 
+* This repo seems too casual and there are some problems are not solved in the Issues, so I am going to revise it when I am free, I am sorry for my laziness! QAQ
 This project is the reproduction of the paper [Deep Models Under the GAN: Information Leakage from Collaborative Deep Learning](https://arxiv.org/pdf/1702.07464.pdf). The details of this project are not exactly the same as the paper, but it can show the effect of this kind of attack, which uses gan to capture the information of other participants' data.
 
 This reproduction assumes that there're 10 clients patcipating the training, and each one of them has a certain class of data.
